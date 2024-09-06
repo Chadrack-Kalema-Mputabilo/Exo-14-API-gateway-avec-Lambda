@@ -1,0 +1,151 @@
+Voici la procédure détaillée pour mettre en place une architecture avec AWS API Gateway et Lambda, intégrée à un site web hébergé sur S3 et utilisant une base de données MySQL sur EC2. Nous inclurons l'utilisation de Secrets Manager pour stocker les identifiants de la base de données.
+
+### Étape 1 : Créer un Site Web avec S3
+
+1. **Créer un Bucket S3** :
+   - Accédez à la console S3.
+   - Créez un nouveau bucket (par exemple, `my-website-bucket`) et assurez-vous que "Block all public access" est désactivé.
+
+2. **Télécharger votre Site Web** :
+   - Créez deux pages, `login.html` et `register.html`, et téléchargez-les dans votre bucket S3.
+
+3. **Configurer le Bucket pour l'Hébergement de Site Web Statique** :
+   - Dans les propriétés du bucket, activez "Static website hosting".
+   - Définissez `login.html` comme document d'index.
+
+4. **Configurer le Nom de Domaine (facultatif)** :
+   - Utilisez Route 53 pour configurer un nom de domaine qui pointe vers votre bucket S3.
+
+### Étape 2 : Lancer une Instance EC2 avec MySQL
+
+1. **Lancer l'Instance EC2** :
+   - Lancez une instance EC2 (par exemple, Amazon Linux 2) et configurez les groupes de sécurité pour autoriser le trafic MySQL (port 3306) et SSH (port 22).
+
+2. **Installer MySQL** :
+   - Connectez-vous à votre instance EC2 via SSH.
+
+   ```bash
+   ssh -i "your-key.pem" ec2-user@<your-ec2-public-ip>
+   ```
+
+   Installez MySQL :
+
+   ```bash
+   sudo yum update -y
+   sudo yum install mysql-server -y
+   ```
+
+   Démarrez MySQL :
+
+   ```bash
+   sudo systemctl start mysqld
+   sudo systemctl enable mysqld
+   ```
+
+3. **Créer une Base de Données et un Utilisateur** :
+   - Connectez-vous à MySQL :
+
+   ```bash
+   mysql -u root -p
+   ```
+
+   Créez une base de données et un utilisateur :
+
+   ```sql
+   CREATE DATABASE mydb;
+   CREATE USER 'myuser'@'%' IDENTIFIED BY 'mypassword';
+   GRANT ALL PRIVILEGES ON mydb.* TO 'myuser'@'%';
+   FLUSH PRIVILEGES;
+   ```
+
+### Étape 3 : Configurer AWS Secrets Manager
+
+1. **Accéder à Secrets Manager** :
+   - Créez un nouveau secret pour stocker vos identifiants MySQL.
+   - Stockez les clés `username`, `password`, et `dbname`.
+
+### Étape 4 : Créer des Fonctions Lambda
+
+1. **Accéder à la console Lambda** :
+   - Créez deux nouvelles fonctions Lambda : `loginFunction` et `registerFunction`.
+
+2. **Configurer les Rôles IAM** :
+   - Assurez-vous que les fonctions Lambda ont une politique IAM qui permet d'accéder à Secrets Manager et à EC2.
+
+3. **Écrire le Code de la Fonction Lambda** :
+   - Pour `loginFunction` et `registerFunction`, utilisez le code suivant :
+
+   ```python
+   import json
+   import boto3
+   import pymysql
+
+   def get_secret():
+       secret_name = "your_secret_name"
+       region_name = "your_region"
+
+       # Créer un client Secrets Manager
+       client = boto3.client('secretsmanager', region_name=region_name)
+
+       # Récupérer le secret
+       get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+       secret = json.loads(get_secret_value_response['SecretString'])
+       return secret['username'], secret['password'], secret['dbname']
+
+   def lambda_handler(event, context):
+       # Récupérer les identifiants
+       username, password, dbname = get_secret()
+
+       # Connexion à MySQL
+       conn = pymysql.connect(host='<your-ec2-public-ip>', user=username, password=password, db=dbname)
+
+       if event['httpMethod'] == 'POST':
+           body = json.loads(event['body'])
+           # Logique de traitement (login ou register)
+           # Retourner une réponse
+           return {
+               'statusCode': 200,
+               'body': json.dumps({'message': 'Success'})
+           }
+       return {
+           'statusCode': 400,
+           'body': json.dumps({'message': 'Bad Request'})
+       }
+   ```
+
+   Remplacez `<your-ec2-public-ip>` par l'IP publique de votre instance EC2.
+
+### Étape 5 : Configurer API Gateway
+
+1. **Accéder à la console API Gateway** :
+   - Créez une nouvelle API REST.
+
+2. **Créer des Ressources et Méthodes** :
+   - Créez une ressource `/login` et ajoutez une méthode POST.
+   - Intégrez-la à la fonction Lambda `loginFunction`.
+   - Créez une ressource `/register` et ajoutez une méthode POST.
+   - Intégrez-la à la fonction Lambda `registerFunction`.
+
+3. **Configurer CORS** :
+   - Pour chaque méthode, activez CORS et définissez les en-têtes autorisés (par exemple, `Content-Type`).
+
+4. **Déployer l'API** :
+   - Créez un nouveau déploiement et définissez un nom de domaine pour votre API.
+
+### Étape 6 : Automatiser le Déploiement dans EC2
+
+1. **Configurer CI/CD** :
+   - Utilisez AWS CodeDeploy ou un autre outil CI/CD pour automatiser le déploiement de votre site web dans l'instance EC2.
+
+### Étape 7 : Tester votre Configuration
+
+1. **Tester les Endpoints** :
+   - Utilisez Postman ou un autre outil pour tester les endpoints `/login` et `/register`.
+   - Assurez-vous que les réponses sont correctes et que la connexion à MySQL fonctionne.
+
+2. **Vérifier CORS** :
+   - Testez les appels depuis votre site web hébergé sur S3 pour vous assurer que les problèmes CORS sont résolus.
+
+### Résumé
+
+Vous avez mis en place un système avec AWS API Gateway et Lambda, intégré à un site web statique hébergé sur S3, utilisant MySQL sur EC2 et stockant les identifiants dans Secrets Manager. Vous avez également configuré CORS pour permettre aux requêtes de votre site web de fonctionner avec l'API.
